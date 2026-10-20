@@ -1,5 +1,4 @@
-import { accountUptime, type GitHubStats } from "./github";
-import type { LanguageShare } from "./github-graphql";
+import { type GitHubStats } from "./github";
 import type { Theme } from "./ascii";
 
 const FONT_SIZE = 16;
@@ -58,21 +57,6 @@ type Line = Span[];
 
 function truncate(value: string, max: number): string {
   return value.length > max ? value.slice(0, max - 1) + "…" : value;
-}
-
-// "JavaScript 63%, TypeScript 25%, Swift 7%" — languages under 1% of the code
-// are noise, and the list is trimmed entry by entry rather than mid-word.
-function formatLanguages(
-  languages: LanguageShare[],
-  maxWidth: number
-): string {
-  const parts = languages
-    .map((l) => ({ name: l.name, percent: Math.round(l.share * 100) }))
-    .filter((l) => l.percent >= 1)
-    .slice(0, 5)
-    .map((l) => `${l.name} ${l.percent}%`);
-  while (parts.length > 1 && parts.join(", ").length > maxWidth) parts.pop();
-  return parts.join(", ");
 }
 
 const SPARK = " ▁▂▃▄▅▆▇█";
@@ -134,33 +118,217 @@ function buildInfoLines(stats: GitHubStats, theme: Theme): Line[] {
     ]);
   };
 
+  const kv3 = (
+    key: string,
+    value: string,
+    secondaryValue: string,
+    key2: string,
+    value2: string
+  ) => {
+    const thirdLabel = " {";
+    const secondaryLabel = "Contributed: ";
+    const secondaryClose = "}";
+    const sep = " | ";
+
+    const val2 = truncate(value2, 12);
+    const overhead2 = key2.length + 2 + val2.length;
+
+    const reserved =
+      thirdLabel.length +
+      secondaryLabel.length +
+      secondaryValue.length +
+      secondaryClose.length +
+      sep.length +
+      overhead2;
+
+    const val = truncate(value, INFO_COLS - key.length - reserved - 8);
+    const dotCount = Math.max(
+      2,
+      INFO_COLS - key.length - val.length - reserved - 6
+    );
+
+    const usedSoFar =
+      2 +
+      key.length +
+      2 +
+      1 +
+      val.length +
+      dotCount +
+      thirdLabel.length +
+      secondaryLabel.length +
+      secondaryValue.length +
+      secondaryClose.length +
+      sep.length +
+      overhead2;
+    const dotCount2 = Math.max(2, INFO_COLS - usedSoFar);
+
+    lines.push([
+      { text: `. ${key}: `, color: c.key },
+      { text: ".".repeat(dotCount), color: c.dots },
+      { text: ` ${val}`, color: c.number },
+      { text: thirdLabel, color: c.value },
+      { text: secondaryLabel, color: c.key },
+      { text: secondaryValue, color: c.number },
+      { text: secondaryClose, color: c.value },
+      { text: sep, color: c.dots },
+      { text: `${key2}: `, color: c.key },
+      { text: ".".repeat(dotCount2), color: c.dots },
+      { text: ` ${val2}`, color: c.number },
+    ]);
+  };
+
+  // Both sides get their own dot-leader. Budget is INFO_COLS minus the
+  // separator only — each side's *own* punctuation is counted once, inside
+  // that side's own overhead, not doubled into a separate shared constant.
+  const kv2Custom = (k1: string, v1: string, k2: string, v2: string) => {
+    const sep = " | ";
+    const budget = INFO_COLS - sep.length;
+
+    const part = (
+      key: string,
+      value: string,
+      isFirst: boolean,
+      dots: number
+    ): Line => {
+      const dotCount = Math.max(2, dots);
+      return [
+        { text: isFirst ? `. ${key}: ` : `${key}: `, color: c.key },
+        { text: ".".repeat(dotCount), color: c.dots },
+        { text: ` ${value}`, color: c.number },
+      ];
+    };
+
+    const overhead1 = 2 + k1.length + 2 + 1 + v1.length;
+    const overhead2 = k2.length + 2 + 1 + v2.length;
+
+    const remaining = Math.max(4, budget - overhead1 - overhead2);
+    const dots1 = Math.floor(remaining / 2);
+    const dots2 = remaining - dots1;
+
+    lines.push([
+      ...part(k1, v1, true, dots1),
+      { text: sep, color: c.rule },
+      ...part(k2, v2, false, dots2),
+    ]);
+  };
+
+  const customkv2 = (k1: string, v1: string, k2: string, v2: string) => {
+    const sep = " | ";
+    const budget = INFO_COLS - sep.length;
+
+    const part = (
+      key: string,
+      value: string,
+      isFirst: boolean,
+      dots: number
+    ): Line => {
+      const dotCount = Math.max(2, dots);
+      return [
+        { text: isFirst ? `. ${key}: ` : `${key}: `, color: c.key },
+        { text: ".".repeat(dotCount), color: c.dots },
+        { text: ` ${value}`, color: c.number },
+      ];
+    };
+
+    const overhead1 = 2 + k1.length + 2 + 1 + v1.length;
+    const overhead2 = k2.length + 2 + 1 + v2.length;
+
+    const MIN_TOTAL_DOTS = 10;
+    const remaining = Math.max(MIN_TOTAL_DOTS, budget - overhead1 - overhead2);
+    const dots1 = Math.floor(remaining / 2);
+
+    const dots2 = remaining - dots1;
+
+    lines.push([
+      ...part(k1, v1, true, dots1),
+      { text: sep, color: c.rule },
+      ...part(k2, v2, false, dots2),
+    ]);
+  };
+
+  const customkv = (
+    key: string,
+    value: string,
+    secondaryValue: string,
+    key2: string,
+    value2: string
+  ) => {
+    const thirdLabel = " {";
+    const secondaryLabel = "Contributed: ";
+    const secondaryClose = "}";
+    const sep = " | ";
+
+    const val2 = truncate(value2, 12);
+    const overhead2 = key2.length + 2 + val2.length;
+
+    const reserved =
+      thirdLabel.length +
+      secondaryLabel.length +
+      secondaryValue.length +
+      secondaryClose.length +
+      sep.length +
+      overhead2;
+
+    const val = truncate(value, INFO_COLS - key.length - reserved - 14);
+    const dotCount = Math.max(
+      2,
+      INFO_COLS - key.length - val.length - reserved - 14
+    );
+
+    const usedSoFar =
+      2 +
+      key.length +
+      2 +
+      1 +
+      val.length +
+      dotCount +
+      thirdLabel.length +
+      secondaryLabel.length +
+      secondaryValue.length +
+      secondaryClose.length +
+      sep.length +
+      overhead2;
+    const dotCount2 = Math.max(6, INFO_COLS - usedSoFar);
+
+    lines.push([
+      { text: `. ${key}: `, color: c.key },
+      { text: ".".repeat(dotCount), color: c.dots },
+      { text: ` ${val}`, color: c.number },
+      { text: thirdLabel, color: c.value },
+      { text: secondaryLabel, color: c.key },
+      { text: secondaryValue, color: c.number },
+      { text: secondaryClose, color: c.value },
+      { text: sep, color: c.dots },
+      { text: `${key2}: `, color: c.key },
+      { text: ".".repeat(dotCount2), color: c.dots },
+      { text: ` ${val2}`, color: c.number },
+    ]);
+  };
+
   const blank = () => lines.push([]);
 
-  header(`${stats.login}@github`);
-  kv("Uptime", accountUptime(stats.createdAt));
-  if (stats.location) kv("Location", stats.location);
-  if (stats.company) kv("Company", stats.company);
-  // Byte shares when GraphQL gave them to us — ranking by repo count puts
-  // OpenSCAD on Linus Torvalds' card.
-  const contrib = stats.contributions;
-  if (contrib && contrib.languages.length > 0) {
-    kv("Languages", formatLanguages(contrib.languages, INFO_COLS - 17));
-  } else if (stats.languages.length > 0) {
-    kv("Languages", stats.languages.join(", "));
-  }
+  // ---------------------------------------------------------------------
+  // SECTION: fknemi@archbtw
+  // ---------------------------------------------------------------------
+  header("fknemi@archbtw");
+  kv("About", "idk");
+  kv("Languages.Programming", "Javascript, Python, Go, Java");
+  kv("Languages.Real", "English, Hindi");
 
-  const contacts: Array<[string, string]> = [];
-  if (stats.email) contacts.push(["Email", stats.email]);
-  if (stats.blog) contacts.push(["Website", stats.blog]);
-  if (stats.twitter) contacts.push(["Twitter", `@${stats.twitter}`]);
-  contacts.push(["GitHub", `github.com/${stats.login}`]);
-
+  // ---------------------------------------------------------------------
+  // SECTION: Contact
+  // ---------------------------------------------------------------------
   blank();
   header("Contact");
-  for (const [key, value] of contacts) kv(key, value);
+  kv("Email.Work", "vihaan.s0b@gmail.com");
+  kv("Email.Personal", "fk.nemi.kf@gmail.com");
 
+  // ---------------------------------------------------------------------
+  // SECTION: GitHub Stats
+  // ---------------------------------------------------------------------
   blank();
   header("GitHub Stats");
+  const contrib = stats.contributions;
   const n = (value: number) => value.toLocaleString("en-US");
   kv2("Repos", n(stats.publicRepos), "Stars", n(stats.stars));
   if (contrib) {
@@ -171,6 +339,9 @@ function buildInfoLines(stats: GitHubStats, theme: Theme): Line[] {
       kv("Top repo", `${contrib.topRepo.name} (${n(contrib.topRepo.stars)} ★)`);
     }
 
+    // ---------------------------------------------------------------------
+    // SECTION: Last 12 Months
+    // ---------------------------------------------------------------------
     blank();
     header("Last 12 Months");
     kv2(
@@ -179,9 +350,6 @@ function buildInfoLines(stats: GitHubStats, theme: Theme): Line[] {
       "Reviews",
       n(contrib.reviews)
     );
-    // The calendar total already includes private work, so this line is a
-    // breakdown rather than an addition — worth a row only when it is a real
-    // share of the year. "Private: 1" is noise.
     if (
       contrib.privateContributions > 0 &&
       contrib.privateContributions >= contrib.lastYear * 0.05
